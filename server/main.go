@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
-	"time"
 )
 
 const (
@@ -14,38 +12,109 @@ const (
 	TYPE = "tcp"
 )
 
-func main() {
-	listen, err := net.Listen(TYPE, HOST+":"+PORT)
-	if err != nil {
-		log.Fatal(err)
-		os.Exit(1)
-	}
+type Client struct {
+	conn    net.Conn
+	id      string
+	manager *ClientManager
+	out     chan string
+}
 
-	// close listener
-	defer listen.Close()
+type ClientManager struct {
+	clients    map[string]*Client
+	register   chan *Client
+	unregister chan *Client
+	broadcast  chan string
+}
+
+func (c *Client) read() {
+	buffer := make([]byte, 1024)
 	for {
-		conn, err := listen.Accept()
+		bytes, err := c.conn.Read(buffer)
 		if err != nil {
-			log.Fatal(err)
-			os.Exit(1)
+			break
+		} else {
+			message := string(buffer[:bytes])
+			c.manager.broadcast <- fmt.Sprintf("%s: %s", c.id, message)
 		}
-		go handleRequest(conn)
+	}
+	c.manager.unregister <- c
+}
+
+func (c *Client) write() {
+	for {
+		message, ok := <-c.out
+		if !ok {
+			break
+		}
+		_, err := c.conn.Write([]byte(message))
+		if err != nil {
+			break
+		}
 	}
 }
 
-func handleRequest(conn net.Conn) {
-	// incoming request
-	buffer := make([]byte, 1024)
-	_, err := conn.Read(buffer)
-	if err != nil {
-		log.Fatal(err)
+func (cm *ClientManager) run() {
+	for {
+		select {
+		case client := <-cm.register:
+			cm.clients[client.id] = client
+			fmt.Println("Client registered:", client.id)
+
+		case client := <-cm.unregister:
+			delete(cm.clients, client.id)
+			if _, ok := cm.clients[client.id]; ok {
+				close(client.out)
+				client.conn.Close()
+			}
+			fmt.Println("Client unregistered:", client.id)
+
+		case message := <-cm.broadcast:
+			for _, client := range cm.clients {
+				client.out <- message
+			}
+			fmt.Println("Broadcasting message:", message)
+		}
 	}
+}
 
-	// write data to response
-	time := time.Now().Format(time.ANSIC)
-	responseStr := fmt.Sprintf("Your message is: %v. Received time: %v", string(buffer[:]), time)
-	conn.Write([]byte(responseStr))
+func main() {
+	// start listener
+	listener, err := net.Listen("tcp", ":"+PORT)
+	if err != nil {
+		log.Print(err)
+	}
+	defer listener.Close()
 
-	// close conn
-	conn.Close()
+	// initialize and start ClientManager
+	manager := &ClientManager{
+		clients:    make(map[string]*Client),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		broadcast:  make(chan string),
+	}
+	go manager.run()
+
+	// accept loop
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Print(err)
+		}
+
+		// create new Client
+		id := conn.RemoteAddr().String()
+		client := &Client{
+			id:      id,
+			conn:    conn,
+			manager: manager,
+			out:     make(chan string),
+		}
+
+		// register the client
+		manager.register <- client
+
+		// start client read/write goroutines
+		go client.read()
+		go client.write()
+	}
 }

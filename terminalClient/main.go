@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"net"
 	"os"
 )
@@ -23,22 +25,38 @@ func main() {
 		println("Dial failed:", err.Error())
 		os.Exit(1)
 	}
+	defer conn.Close()
 
-	_, err = conn.Write([]byte("This is a message"))
-	if err != nil {
-		println("Write data failed:", err.Error())
-		os.Exit(1)
-	}
+	// writer goroutine: read from stdin and send to server
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			fmt.Print("> ")
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				fmt.Println("Error reading input:", err)
+				return
+			}
+			_, err = conn.Write([]byte(line))
+			if err != nil {
+				fmt.Println("Write data failed:", err)
+				return
+			}
+			if line == "/quit\n" {
+				conn.Close()
+				os.Exit(0)
+			}
+		}
+	}()
 
 	// buffer to make data
-	received := make([]byte, 1024)
-	_, err = conn.Read(received)
-	if err != nil {
-		println("Read data failed:", err.Error())
-		os.Exit(1)
+	buffer := make([]byte, 1024)
+	for {
+		msg, err := conn.Read(buffer)
+		if err != nil {
+			fmt.Println("Server closed connection.")
+			return
+		}
+		fmt.Print(string(buffer[:msg]))
 	}
-
-	println("Received message:", string(received))
-
-	conn.Close()
 }
