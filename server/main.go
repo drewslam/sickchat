@@ -1,26 +1,50 @@
+// sickchat - A simple terminal chat client and server
+// Copyright (C) 2025 Andrew Souza
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 package main
 
 import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
+	"sync"
+
+	"github.com/drewslam/sickchat/common"
 )
 
 const (
-	HOST = "localhost"
-	PORT = "8080"
-	TYPE = "tcp"
+	HOST = common.HOST
+	PORT = common.PORT
+	TYPE = common.TYPE
 )
 
+var clientIDCounter = 0
+var clients = make(map[int]*Client)
+var mu sync.Mutex
+
 type Client struct {
+	id      int
 	conn    net.Conn
-	id      string
 	manager *ClientManager
 	out     chan string
 }
 
 type ClientManager struct {
-	clients    map[string]*Client
+	clients    map[int]*Client
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan string
@@ -34,7 +58,7 @@ func (c *Client) read() {
 			break
 		} else {
 			message := string(buffer[:bytes])
-			c.manager.broadcast <- fmt.Sprintf("%s: %s", c.id, message)
+			c.manager.broadcast <- fmt.Sprintf("%d: %s", c.id, message)
 		}
 	}
 	c.manager.unregister <- c
@@ -77,6 +101,18 @@ func (cm *ClientManager) run() {
 	}
 }
 
+func broadcastUserList() {
+	var ids []string
+	for id := range clients {
+		ids = append(ids, fmt.Sprintf("%d", id))
+	}
+	userListMsg := "USERS:" + strings.Join(ids, ",") + "\n"
+
+	for _, client := range clients {
+		client.conn.Write([]byte(userListMsg))
+	}
+}
+
 func main() {
 	// start listener
 	listener, err := net.Listen("tcp", ":"+PORT)
@@ -87,7 +123,7 @@ func main() {
 
 	// initialize and start ClientManager
 	manager := &ClientManager{
-		clients:    make(map[string]*Client),
+		clients:    make(map[int]*Client),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		broadcast:  make(chan string),
@@ -102,13 +138,20 @@ func main() {
 		}
 
 		// create new Client
-		id := conn.RemoteAddr().String()
+		clientIDCounter++
+		clientID := clientIDCounter
 		client := &Client{
-			id:      id,
+			id:      clientID,
 			conn:    conn,
 			manager: manager,
 			out:     make(chan string),
 		}
+
+		clients[clientID] = client
+
+		fmt.Fprintf(conn, "ID:%d\n", clientID)
+
+		broadcastUserList()
 
 		// register the client
 		manager.register <- client

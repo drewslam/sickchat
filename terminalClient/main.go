@@ -1,62 +1,36 @@
+// sickchat - A simple terminal chat client and server
+// Copyright (C) 2025 Andrew Souza
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"net"
-	"os"
+	"github.com/drewslam/sickchat/common"
+	"github.com/drewslam/sickchat/terminalClient/ui"
 )
 
 const (
-	HOST = "localhost"
-	PORT = "8080"
-	TYPE = "tcp"
+	HOST = common.HOST
+	PORT = common.PORT
+	TYPE = common.TYPE
 )
 
 func main() {
-	tcpServer, err := net.ResolveTCPAddr(TYPE, HOST+":"+PORT)
-	if err != nil {
-		println("ResolveTCPAddr failed:", err.Error())
-		os.Exit(1)
-	}
+	app := ui.NewApp()
 
-	conn, err := net.DialTCP(TYPE, nil, tcpServer)
-	if err != nil {
-		println("Dial failed:", err.Error())
-		os.Exit(1)
-	}
-	defer conn.Close()
-
-	// writer goroutine: read from stdin and send to server
-	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			fmt.Print("> ")
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				fmt.Println("Error reading input:", err)
-				return
-			}
-			_, err = conn.Write([]byte(line))
-			if err != nil {
-				fmt.Println("Write data failed:", err)
-				return
-			}
-			if line == "/quit\n" {
-				conn.Close()
-				os.Exit(0)
-			}
-		}
-	}()
-
-	// buffer to make data
-	buffer := make([]byte, 1024)
-	for {
-		msg, err := conn.Read(buffer)
-		if err != nil {
-			fmt.Println("Server closed connection.")
-			return
-		}
-		fmt.Print(string(buffer[:msg]))
+	if err := app.Run(); err != nil {
+		panic(err)
 	}
 }
