@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"net"
@@ -51,14 +52,15 @@ type ClientManager struct {
 }
 
 func (c *Client) read() {
-	buffer := make([]byte, 1024)
+	reader := bufio.NewReader(c.conn)
 	for {
-		bytes, err := c.conn.Read(buffer)
+		line, err := reader.ReadString('\n')
 		if err != nil {
 			break
-		} else {
-			message := string(buffer[:bytes])
-			c.manager.broadcast <- fmt.Sprintf("%d: %s", c.id, message)
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			c.manager.broadcast <- fmt.Sprintf("%d: %s", c.id, line)
 		}
 	}
 	c.manager.unregister <- c
@@ -70,8 +72,12 @@ func (c *Client) write() {
 		if !ok {
 			break
 		}
+		if !strings.HasSuffix(message, "\n") {
+			message += "\n"
+		}
 		_, err := c.conn.Write([]byte(message))
 		if err != nil {
+			fmt.Printf("Write error to client %d: %v\n", c.id, err)
 			break
 		}
 	}
@@ -105,6 +111,9 @@ func broadcastUserList() {
 	var ids []string
 	for id := range clients {
 		ids = append(ids, fmt.Sprintf("%d", id))
+	}
+	if len(ids) == 0 {
+		return
 	}
 	userListMsg := "USERS:" + strings.Join(ids, ",") + "\n"
 

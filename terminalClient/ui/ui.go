@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/drewslam/sickchat/common"
 	"github.com/gdamore/tcell/v2"
@@ -35,6 +36,7 @@ type Application struct {
 	UserList   *tview.List
 	UserInput  *tview.InputField
 	Conn       net.Conn
+	ClientID   string
 }
 
 func NewApp() *Application {
@@ -51,8 +53,7 @@ func NewApp() *Application {
 		Conn:       conn,
 	}
 
-	yourID := conn.LocalAddr().String()
-	app.UserList.AddItem("You ("+yourID+")", "", 0, nil)
+	// yourID := conn.LocalAddr().String()
 
 	// Configure input field
 	app.UserInput.
@@ -116,31 +117,48 @@ func NewApp() *Application {
 				return
 			}
 			app.App.QueueUpdateDraw(func() {
-				// Display message
-				fmt.Fprint(app.ChatWindow, msg)
+				msg = strings.TrimSpace(msg)
 
-				// Try to parse sender from msg
-				var sender string
-				for i := 0; i < len(msg); i++ {
-					if msg[i] == ':' {
-						sender = msg[:i]
-						break
+				switch {
+				case strings.HasPrefix(msg, "ID:"):
+					id := strings.TrimPrefix(msg, "ID:")
+					app.ClientID = id
+					// app.updateUserList([]string{id}) // show local ID as "You"
+				case strings.HasPrefix(msg, "USERS:"):
+					raw := strings.TrimPrefix(msg, "USERS:")
+					if raw != "" {
+						ids := strings.Split(raw, ",")
+						var filtered []string
+						for _, id := range ids {
+							if id != app.ClientID {
+								filtered = append(filtered, id)
+							}
+						}
+						app.updateUserList(filtered)
+					} else {
+						app.updateUserList([]string{})
 					}
+
+				default:
+					// Display message
+					fmt.Fprintln(app.ChatWindow, msg)
 				}
 
-				// Add to user list if not already there
-				if sender != "" {
-					found := false
-					for i := 0; i < app.UserList.GetItemCount(); i++ {
-						name, _ := app.UserList.GetItemText(i)
-						if name == sender {
-							found = true
-							break
+				// Try to parse sender from msg
+				if i := strings.Index(msg, ":"); i != -1 {
+					sender := msg[:i]
+					if sender != "USERS" && sender != "ID" {
+						// found := false
+						for i := 0; i < app.UserList.GetItemCount(); i++ {
+							name, _ := app.UserList.GetItemText(i)
+							if name == sender {
+								// found = true
+								break
+							}
 						}
-					}
-
-					if !found {
-						app.UserList.AddItem(sender, "", 0, nil)
+						// if !found {
+						//	app.UserList.AddItem(sender, "", 0, nil)
+						// }
 					}
 				}
 			})
@@ -155,4 +173,19 @@ func NewApp() *Application {
 
 func (a *Application) Run() error {
 	return a.App.Run()
+}
+
+func (a *Application) updateUserList(ids []string) {
+	a.UserList.Clear()
+
+	if a.ClientID != "" {
+		a.UserList.AddItem(fmt.Sprintf("User %s", a.ClientID), "", 0, nil)
+	}
+
+	for _, id := range ids {
+		if id == "" || id == a.ClientID {
+			continue
+		}
+		a.UserList.AddItem(fmt.Sprintf("User %s", id), "", 0, nil)
+	}
 }
